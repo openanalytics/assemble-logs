@@ -8,7 +8,7 @@ pipeline {
 
     options {
         authorizationMatrix(['hudson.model.Item.Build:hci', 'hudson.model.Item.Read:hci'])
-        buildDiscarder(logRotator(numToKeepStr: '3'))
+        buildDiscarder(logRotator(numToKeepStr: '8'))
     }
 
     environment {
@@ -31,8 +31,9 @@ pipeline {
 
                             // Install libjq-dev
                             sh "sudo apt-get update"
-                            sh "sudo apt-get --yes --force-yes install libjq-dev"
-                            sh "sudo apt-get --yes --force-yes install libonig-dev"
+                            sh "sudo apt-get --yes install libjq-dev"
+                            sh "sudo apt-get --yes install autoconf"
+                            sh "sudo apt-get --yes install libtool"
                         }
                     }
                 }
@@ -51,6 +52,7 @@ pipeline {
         stage('deploy to nexus') {
             steps {
                 withCredentials([usernameColonPassword(credentialsId: 'oa-jenkins', variable: 'USERPASS')]) {
+                    sh "ls target/x86_64-unknown-linux-musl/release/"
                     sh "curl -v -u $USERPASS --upload-file target/x86_64-unknown-linux-musl/release/${NAME} https://nexus.openanalytics.eu/repository/minos/${NAME}/${env.BRANCH_NAME}/${env.BUILD_NUMBER}/${NAME}"
                     sh "curl -v -u $USERPASS --upload-file target/x86_64-unknown-linux-musl/release/${NAME} https://nexus.openanalytics.eu/repository/minos/${NAME}/${env.BRANCH_NAME}/${NAME}-latest"
                 }

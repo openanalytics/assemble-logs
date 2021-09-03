@@ -43,7 +43,7 @@ pipeline {
             steps {
                 container('musl') {
                     timestamps {
-                        sh "cargo build --release"
+                        sh "cargo build --release --features bundled"
                     }
                 }
             }

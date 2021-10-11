@@ -10,6 +10,7 @@ use std::{
     collections::HashMap,
     fmt::Write,
     fs,
+    time::Instant,
     io::{self, BufRead, Read},
     path::PathBuf,
 };
@@ -72,30 +73,37 @@ fn main() -> anyhow::Result<()> {
         .as_ref()
         .map(|jq| jq_rs::compile(&jq).expect("Failed to compile jq transformation program"));
 
+    let start = Instant::now();
     // stream of strings = Read
     // how can we paste strings together...?
     let mut content = Vec::new();
     for (path, compressed) in paths {
-        let mut file = fs::File::open(path)?;
+        let mut file = fs::File::open(&path)?;
         if compressed {
+            let start = Instant::now();
             let mut decoder = GzDecoder::new(file);
             decoder.read_to_end(&mut content)?;
+            println!("{:?} decoded in {:?}", path,  Instant::now()  - start);
         } else {
             file.read_to_end(&mut content)?;
         }
     }
 
+    let mut n_lines = 0;
     for line in io::BufReader::new(&content[..]).lines() {
         let line = line?;
         let include = if let Some(ref mut jq) = jq {
             match jq.run(&line) {
-                Ok(s) => s
-                    .trim()
-                    .parse::<bool>()
-                    .expect("jq filter must output a bool"),
+                Ok(s) => {
+                    n_lines += 1;
+                    s.trim()
+                        .parse::<bool>()
+                        .expect("jq filter must output a bool")
+                }
                 Err(_) => false,
             }
         } else {
+            n_lines += 1;
             true
         };
 
@@ -123,6 +131,8 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
+    println!("END OUTPUT - n_lines={}", n_lines);
+    println!("Duration: {:?}", Instant::now() - start);
 
     Ok(())
 }

@@ -10,14 +10,16 @@ use std::{
     collections::HashMap,
     fmt::Write,
     fs,
-    time::Instant,
     io::{self, BufRead, Read},
     path::PathBuf,
+    time::Instant,
 };
 
 use flate2::read::GzDecoder;
 
-use clap::{AppSettings, Clap};
+use clap::{AppSettings, Clap, IntoApp};
+
+mod built;
 
 /// Assemble logs that were rotated with the `file-rotate` crate. Given the main log, it reads all
 /// rotated log files in order, decompresses if necessary, concatenates, filters using optional
@@ -27,11 +29,25 @@ use clap::{AppSettings, Clap};
 ///
 /// Show only logs within a 30 minutes timespan.
 ///
-/// assemble_logs all.log '.ts > "2021-09-02T22" and .ts < "2021-09-02T22:30"'  | less -R
+/// assemble-logs all.log '.ts > "2021-09-02T22" and .ts < "2021-09-02T22:30"'  | less -R
 
 #[derive(Clap)]
 #[clap(setting = AppSettings::ColoredHelp)]
+#[clap(setting = AppSettings::DisableVersionFlag)]
 struct Opts {
+    #[clap(short, long)]
+    versjon: bool,
+    #[clap(subcommand)]
+    subcmd: Option<SubCommand>,
+}
+
+#[derive(Clap)]
+enum SubCommand {
+    Assemble(AssembleOpts),
+    Follow(FollowOpts),
+}
+#[derive(Clap)]
+struct AssembleOpts {
     /// The path to the main log file.
     log_path: PathBuf,
     /// JQ query; must return a bool; only used for filtering
@@ -51,88 +67,101 @@ struct Opts {
     #[clap(long)]
     jq_transformation: Option<String>,
 }
+#[derive(Clap)]
+struct FollowOpts {}
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-
-    let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
-    let paths = suffix_scheme
-        .scan_suffixes(&opts.log_path)
-        .into_iter()
-        .rev() // oldest to newest;
-        .map(|suffix| (suffix.to_path(&opts.log_path), suffix.compressed))
-        .chain([(opts.log_path.clone(), false)])
-        .collect::<Vec<_>>();
-
-    let mut jq = opts
-        .jq
-        .as_ref()
-        .map(|jq| jq_rs::compile(&jq).expect("Failed compiling jq program"));
-    let mut jq_trans = opts
-        .jq_transformation
-        .as_ref()
-        .map(|jq| jq_rs::compile(&jq).expect("Failed to compile jq transformation program"));
-
-    let start = Instant::now();
-    // stream of strings = Read
-    // how can we paste strings together...?
-    let mut content = Vec::new();
-    for (path, compressed) in paths {
-        let mut file = fs::File::open(&path)?;
-        if compressed {
-            let start = Instant::now();
-            let mut decoder = GzDecoder::new(file);
-            decoder.read_to_end(&mut content)?;
-            println!("{:?} decoded in {:?}", path,  Instant::now()  - start);
-        } else {
-            file.read_to_end(&mut content)?;
-        }
+    if opts.versjon {
+        crate::built::print_info_lala("assemble-logs");
+        std::process::exit(0);
     }
+    match opts.subcmd {
+        Some(SubCommand::Assemble(opts)) => {
+            let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
+            let paths = suffix_scheme
+                .scan_suffixes(&opts.log_path)
+                .into_iter()
+                .rev() // oldest to newest;
+                .map(|suffix| (suffix.to_path(&opts.log_path), suffix.compressed))
+                .chain([(opts.log_path.clone(), false)])
+                .collect::<Vec<_>>();
 
-    let mut n_lines = 0;
-    for line in io::BufReader::new(&content[..]).lines() {
-        let line = line?;
-        let include = if let Some(ref mut jq) = jq {
-            match jq.run(&line) {
-                Ok(s) => {
-                    n_lines += 1;
-                    s.trim()
-                        .parse::<bool>()
-                        .expect("jq filter must output a bool")
+            let mut jq = opts
+                .jq
+                .as_ref()
+                .map(|jq| jq_rs::compile(&jq).expect("Failed compiling jq program"));
+            let mut jq_trans = opts.jq_transformation.as_ref().map(|jq| {
+                jq_rs::compile(&jq).expect("Failed to compile jq transformation program")
+            });
+
+            let start = Instant::now();
+            // stream of strings = Read
+            // how can we paste strings together...?
+            let mut content = Vec::new();
+            for (path, compressed) in paths {
+                let mut file = fs::File::open(&path)?;
+                if compressed {
+                    let start = Instant::now();
+                    let mut decoder = GzDecoder::new(file);
+                    decoder.read_to_end(&mut content)?;
+                    println!("{:?} decoded in {:?}", path, Instant::now() - start);
+                } else {
+                    file.read_to_end(&mut content)?;
                 }
-                Err(_) => false,
             }
-        } else {
-            n_lines += 1;
-            true
-        };
 
-        if include {
-            if opts.no_format {
-                if let Some(ref mut jq_trans) = jq_trans {
-                    match jq_trans.run(&line) {
-                        Ok(s) => print!("{}", s),
-                        Err(e) => println!("{}", e),
+            let mut n_lines = 0;
+            for line in io::BufReader::new(&content[..]).lines() {
+                let line = line?;
+                let include = if let Some(ref mut jq) = jq {
+                    match jq.run(&line) {
+                        Ok(s) => {
+                            n_lines += 1;
+                            s.trim()
+                                .parse::<bool>()
+                                .expect("jq filter must output a bool")
+                        }
+                        Err(_) => false,
                     }
                 } else {
-                    println!("{}", line);
-                }
-            } else {
-                match format(&line, &opts) {
-                    Ok(formatted) => println!("{}", formatted),
-                    Err(e) => {
-                        if opts.error_details {
-                            println!("Format error: {:#?}, line: {}", e, line);
+                    n_lines += 1;
+                    true
+                };
+
+                if include {
+                    if opts.no_format {
+                        if let Some(ref mut jq_trans) = jq_trans {
+                            match jq_trans.run(&line) {
+                                Ok(s) => print!("{}", s),
+                                Err(e) => println!("{}", e),
+                            }
                         } else {
-                            println!("<error; {}>", e);
+                            println!("{}", line);
+                        }
+                    } else {
+                        match format(&line, &opts) {
+                            Ok(formatted) => println!("{}", formatted),
+                            Err(e) => {
+                                if opts.error_details {
+                                    println!("Format error: {:#?}, line: {}", e, line);
+                                } else {
+                                    println!("<error; {}>", e);
+                                }
+                            }
                         }
                     }
                 }
             }
+            println!("END OUTPUT - n_lines={}", n_lines);
+            println!("Duration: {:?}", Instant::now() - start);
+        }
+        Some(SubCommand::Follow(_)) => unimplemented!(),
+        None => {
+            Opts::into_app().print_help().unwrap();
+            std::process::exit(0);
         }
     }
-    println!("END OUTPUT - n_lines={}", n_lines);
-    println!("Duration: {:?}", Instant::now() - start);
 
     Ok(())
 }
@@ -147,7 +176,7 @@ struct Record {
     #[serde(flatten)]
     rest: HashMap<String, Value>,
 }
-fn format(record: &str, opts: &Opts) -> anyhow::Result<String> {
+fn format(record: &str, opts: &AssembleOpts) -> anyhow::Result<String> {
     use termion::{color, style};
     let record: Record = from_str(record).context("serde")?;
 

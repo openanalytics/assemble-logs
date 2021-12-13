@@ -1,8 +1,5 @@
 use anyhow::Context;
-use chrono::{
-    offset::{Local, Utc},
-    DateTime, Duration, NaiveDateTime,
-};
+use chrono::{Duration, NaiveDateTime};
 use file_rotate::suffix::{FileLimit, SuffixScheme, TimestampSuffixScheme};
 use serde::Deserialize;
 use serde_json::{from_str, Value};
@@ -53,6 +50,13 @@ struct AssembleOpts {
     /// JQ query; must return a bool; only used for filtering
     jq: Option<String>,
 
+    /// Any prefix of a timestamp in the format "%Y%m%dT%H%M%S"
+    /// The system will already filter out files that have a lexically older stimestamp.
+    /// This will also be used to filter records, so you don't necessarily have to use the `jq`
+    /// filter for that.
+    #[clap(short, long)]
+    after: Option<String>,
+
     /// Compact - don't print newline on each key-value
     #[clap(short, long)]
     compact: bool,
@@ -79,10 +83,24 @@ fn main() -> anyhow::Result<()> {
     match opts.subcmd {
         Some(SubCommand::Assemble(opts)) => {
             let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
+
+            // Strip away all characters except numbers, because the timestamp format in filenames
+            // is all numbers.
+            let after_stripped = opts.after.clone().map(|mut after| {
+                after.retain(char::is_numeric);
+                after
+            });
             let paths = suffix_scheme
                 .scan_suffixes(&opts.log_path)
                 .into_iter()
-                .rev() // oldest to newest;
+                .filter(|suffix| {
+                    if let Some(ref after) = after_stripped {
+                        &suffix.suffix.timestamp >= after
+                    } else {
+                        true
+                    }
+                })
+                .rev() // oldest to newest
                 .map(|suffix| (suffix.to_path(&opts.log_path), suffix.compressed))
                 .chain([(opts.log_path.clone(), false)])
                 .collect::<Vec<_>>();
@@ -96,8 +114,8 @@ fn main() -> anyhow::Result<()> {
             });
 
             let start = Instant::now();
-            // stream of strings = Read
-            // how can we paste strings together...?
+
+            // Read all files
             let mut content = Vec::new();
             for (path, compressed) in paths {
                 let mut file = fs::File::open(&path)?;
@@ -111,11 +129,19 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
+            // Compile a JQ program for the optional `after` argument - filtering on .ts
+            let mut after_jq = opts.after.as_ref().map(|after| {
+                jq_rs::compile(&format!(".ts > {:?}", after))
+                    .expect("Failed compiling `after` jq program")
+            });
+
             let mut n_lines = 0;
             for line in io::BufReader::new(&content[..]).lines() {
                 let line = line?;
-                let include = if let Some(ref mut jq) = jq {
-                    match jq.run(&line) {
+
+                let mut include = true;
+                for filter in after_jq.iter_mut().chain(&mut jq) {
+                    let result = match filter.run(&line) {
                         Ok(s) => {
                             n_lines += 1;
                             s.trim()
@@ -123,13 +149,12 @@ fn main() -> anyhow::Result<()> {
                                 .expect("jq filter must output a bool")
                         }
                         Err(_) => false,
-                    }
-                } else {
-                    n_lines += 1;
-                    true
-                };
+                    };
+                    include &= result;
+                }
 
                 if include {
+                    n_lines += 1;
                     if opts.no_format {
                         if let Some(ref mut jq_trans) = jq_trans {
                             match jq_trans.run(&line) {
@@ -221,8 +246,8 @@ fn format(record: &str, opts: &AssembleOpts) -> anyhow::Result<String> {
         record.msg
     )?;
 
-    let len = record.rest.len();
-    for (i, (key, value)) in record.rest.into_iter().enumerate() {
+    // let len = record.rest.len();
+    for (_i, (key, value)) in record.rest.into_iter().enumerate() {
         let newline = if opts.compact { "" } else { "\n\t" };
         write!(
             &mut output,

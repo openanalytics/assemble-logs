@@ -17,6 +17,9 @@ use flate2::read::GzDecoder;
 use clap::{AppSettings, Clap, IntoApp};
 
 mod built;
+mod unformatted_datetime;
+
+use unformatted_datetime::parse_unformatted_datetime;
 
 /// Assemble logs that were rotated with the `file-rotate` crate. Given the main log, it reads all
 /// rotated log files in order, decompresses if necessary, concatenates, filters using optional
@@ -84,18 +87,26 @@ fn main() -> anyhow::Result<()> {
         Some(SubCommand::Assemble(opts)) => {
             let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
 
-            // Strip away all characters except numbers, because the timestamp format in filenames
-            // is all numbers.
-            let after_stripped = opts.after.clone().map(|mut after| {
-                after.retain(char::is_numeric);
-                after
+            let after_datetime = opts
+                .after
+                .clone()
+                .map(|after| parse_unformatted_datetime(&after).context("Invalid `after` argument"))
+                .transpose()?;
+            let after_formatted = after_datetime.map(|datetime| {
+                let formatted = datetime.format(suffix_scheme.format).to_string();
+                println!(
+                    "Filtering files by the date {}, thus suffix {}",
+                    datetime, formatted
+                );
+                formatted
             });
             let paths = suffix_scheme
                 .scan_suffixes(&opts.log_path)
                 .into_iter()
                 .filter(|suffix| {
-                    if let Some(ref after) = after_stripped {
-                        &suffix.suffix.timestamp >= after
+                    let suffix = &suffix.suffix.timestamp;
+                    if let Some(ref after) = after_formatted {
+                        suffix >= after
                     } else {
                         true
                     }
@@ -130,11 +141,14 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Compile a JQ program for the optional `after` argument - filtering on .ts
-            let mut after_jq = opts.after.as_ref().map(|after| {
-                jq_rs::compile(&format!(".ts > {:?}", after))
+            let mut after_jq = after_datetime.as_ref().map(|after| {
+                let after = after.format(date_time::FORMAT);
+
+                jq_rs::compile(&format!(".ts > \"{}\"", after))
                     .expect("Failed compiling `after` jq program")
             });
 
+            println!("");
             let mut n_lines = 0;
             for line in io::BufReader::new(&content[..]).lines() {
                 let line = line?;
@@ -267,7 +281,7 @@ pub mod date_time {
     use chrono::NaiveDateTime;
     use serde::{self, Deserialize, Deserializer, Serializer};
 
-    const FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
+    pub const FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
 
     pub fn serialize<S>(date: &NaiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
     where

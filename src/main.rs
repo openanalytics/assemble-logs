@@ -80,7 +80,7 @@ struct FollowOpts {}
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     if opts.versjon {
-        crate::built::print_info_lala("assemble-logs");
+        crate::built::print_version_info("assemble-logs");
         std::process::exit(0);
     }
     match opts.subcmd {

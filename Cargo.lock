@@ -172,9 +172,9 @@ dependencies = [
 
 [[package]]
 name = "file-rotate"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b53e2e7c8a73eb22c41be205404a1464167893a85684449403b877bdaacc43f"
+checksum = "31c2536ee16e019920dbef075aa3edc7efa8029fe17fe4330dd9690ee155a411"
 dependencies = [
  "chrono",
  "flate2",

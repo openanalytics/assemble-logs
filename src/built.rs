@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
-pub fn print_info_lala(name: &str) {
+pub fn print_version_info(name: &str) {
     let commit = GIT_VERSION.unwrap_or("NA");
     let dt = chrono::DateTime::parse_from_str(BUILT_TIME_UTC, "%a, %d %h %Y %T %z")
         .unwrap()
@@ -12,7 +12,7 @@ pub fn print_info_lala(name: &str) {
     println!("profile: {}", PROFILE);
     println!("features: {}", FEATURES_STR);
 }
-pub fn print_info_short(name: &str) {
+pub fn print_version_info_short(name: &str) {
     let commit = GIT_VERSION.unwrap_or("NA");
     let dt = chrono::DateTime::parse_from_str(BUILT_TIME_UTC, "%a, %d %h %Y %T %z")
         .unwrap()

@@ -1,12 +1,12 @@
 # assemble-logs
 
-Given log files with JSON records, rotated with suffixes:
+Given log files with JSON records, rotated with suffixes using [`file-rotate`](https://crates.io/crates/file-rotate):
 - Assemble the contents of log files in chronological order
 - Filter records based on `jq`-syntax query
 - Format remaining records for terminal viewing
 
 ## log record format
-This crate is made to work with the `file-rotate` crate and `slog-json`.
+This crate is made to work with the [`file-rotate`](https://crates.io/crates/file-rotate) crate and `slog-json`.
 It assumes that slog records are written as JSON, and files rotated with `file-rotate`.
 Example log record:
 ```

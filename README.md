@@ -1,11 +1,11 @@
 # assemble-logs
 
-Given log files with JSON records, rotated with suffixes using [`file-rotate`](https://crates.io/crates/file-rotate):
+Given log files that contain JSON records and are rotated with suffixes using [`file-rotate`](https://crates.io/crates/file-rotate):
 - Assemble the contents of log files in chronological order
 - Filter records based on `jq`-syntax query
 - Format remaining records for terminal viewing
 
-## log record format
+## Log record format
 This crate is made to work with the [`file-rotate`](https://crates.io/crates/file-rotate) crate and `slog-json`.
 It assumes that slog records are written as JSON, and files rotated with `file-rotate`.
 Example log record:
@@ -14,7 +14,7 @@ Example log record:
 ```
 So it has the keys `"msg", "level", "ts", "tag"`. The rest of the keys are key-value pairs from slog (which can obviously also be used in your `jq` filter).
 
-## file suffix format
+## File suffix format
 We currently use a hard-coded suffix scheme:
 ```
 let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
@@ -90,15 +90,16 @@ Everything actix-related (e.g. all incoming requests):
 
 The `-a/--after` argument may seem superfluous since we can do the same with a filter on `.ts` as seen above.
 However, it is difficult to extract the `.ts` part of the filter in order to filter out _files_ (as opposed to _records_).
+Much time can be saved by filtering out entire files so that they need not be decompressed and their contents processed.
 `-a` should thus be used instead of a jq filter when you want to filter out records before the given timestamp.
-This will not only filter files but also records.
+This will apply the same filter on individual records.
 
 
 ```
 $ assemble-logs assemble logs/all.log -a 2022-01-31T12 | less -r
 ```
 
-This thus outputs formatted records starting with:
+This outputs formatted records starting with:
 ```
 Jan 31 12:00:00.151 DEBG [poller] Poll
         poller: 8160

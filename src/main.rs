@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::{Duration, NaiveDateTime};
-use file_rotate::suffix::{FileLimit, SuffixScheme, TimestampSuffixScheme};
+use file_rotate::suffix::{AppendTimestamp, FileLimit, SuffixScheme};
 use serde::Deserialize;
 use serde_json::{from_str, Value};
 use std::{
@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
     }
     match opts.subcmd {
         Some(SubCommand::Assemble(opts)) => {
-            let suffix_scheme = TimestampSuffixScheme::default(FileLimit::Age(Duration::weeks(1)));
+            let suffix_scheme = AppendTimestamp::default(FileLimit::Age(Duration::weeks(1)));
 
             let after_datetime = opts
                 .after
